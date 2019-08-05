@@ -36,11 +36,11 @@ class ImageHelper:
             ratio = 1.0
         elif self.S == -2:
             if np.max(im_size_hw) > 124:
-                ratio = 1024.0/np.max(im_size_hw)
+                ratio = 1024.0 / np.max(im_size_hw)
             else:
                 ratio = -1
         else:
-            ratio = float(self.S)/np.max(im_size_hw)
+            ratio = float(self.S) / np.max(im_size_hw)
         new_size = tuple(np.round(im_size_hw * ratio).astype(np.int32))
         im_resized = self.transforms(im.resize((new_size[1], new_size[0]), Image.BILINEAR))
         # If there is a roi, adapt the roi to the new size and crop. Do not rescale
@@ -63,7 +63,7 @@ class ImageHelper:
         b = (np.maximum(H, W) - w) / (steps - 1)
         # steps(idx) regions for long dimension. The +1 comes from Matlab
         # 1-indexing...
-        idx = np.argmin(np.abs(((w**2 - w * b) / w**2) - ovr)) + 1
+        idx = np.argmin(np.abs(((w ** 2 - w * b) / w ** 2) - ovr)) + 1
 
         # Region overplus per dimension
         Wd = 0
@@ -74,7 +74,7 @@ class ImageHelper:
             Hd = idx
 
         regions_xywh = []
-        for l in range(1, L+1):
+        for l in range(1, L + 1):
             wl = np.floor(2 * w / (l + 1))
             wl2 = np.floor(wl / 2 - 1)
             # Center coordinates
@@ -109,6 +109,7 @@ class PCA(object):
     '''
     Fits and applies PCA whitening
     '''
+
     def __init__(self, n_components):
         self.n_components = n_components
 
@@ -151,7 +152,7 @@ class Dataset:
         self.eval_binary_path = eval_binary_path
         # Some images from the Paris dataset are corrupted. Standard practice is
         # to ignore them
-        self.blacklisted = set(["paris_louvre_000136",
+        self.blacklisted = {"paris_louvre_000136",
                             "paris_louvre_000146",
                             "paris_moulinrouge_000422",
                             "paris_museedorsay_001059",
@@ -170,7 +171,7 @@ class Dataset:
                             "paris_triomphe_000662",
                             "paris_triomphe_000833",
                             "paris_triomphe_000863",
-                            "paris_triomphe_000867"])
+                            "paris_triomphe_000867"}
         self.load()
 
     def load(self):
@@ -213,7 +214,7 @@ class Dataset:
                 self.non_relevants[q_name] = [i for i in range(len(self.img_filenames))
                                               if self.img_filenames[i] not in good_plus_junk]
                 self.q_roi[q_name] = np.array([float(q) for q in q_data[1:]], dtype=np.float32)
-                #np.array(map(float, q_data[1:]), dtype=np.float32)
+                # np.array(map(float, q_data[1:]), dtype=np.float32)
 
         self.q_names = self.name_to_filename.keys()
         self.q_index = np.array([self.img_filenames.index(self.name_to_filename[qn])
@@ -235,7 +236,7 @@ class Dataset:
     def score_rnk_partial(self, i, idx, temp_dir, eval_bin):
         rnk = np.array(self.img_filenames)[idx]
         with open("{0}/{1}.rnk".format(temp_dir, self.q_names[i]), 'w') as f:
-            f.write("\n".join(rnk)+"\n")
+            f.write("\n".join(rnk) + "\n")
         cmd = "{0} {1}{2} {3}/{4}.rnk".format(eval_bin, self.lab_root, self.q_names[i], temp_dir, self.q_names[i])
         p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         map_ = float(p.stdout.readlines()[0])
@@ -261,7 +262,7 @@ def ensure_directory_exists(fname):
 
 
 def normalize_L2(a, dim):
-    norms = torch.sqrt(torch.sum(a**2, dim=dim, keepdim=True))
+    norms = torch.sqrt(torch.sum(a ** 2, dim=dim, keepdim=True))
     return a / norms
 
 
@@ -316,7 +317,7 @@ if __name__ == '__main__':
                         choices=['Oxford', 'Paris'], help='Dataset name')
     parser.add_argument('--stage', type=str, default='extract_train',
                         choices=['extract_train', 'train_pca', 'db_features',
-                        'q_features', 'eval'], help='what action to perform ')
+                                 'q_features', 'eval'], help='what action to perform ')
     parser.add_argument('--eval_binary', type=str, required=True,
                         help='Path to the compute_ap binary to evaluate Oxford / Paris')
     parser.add_argument('--temp_dir', type=str, default='',
@@ -332,7 +333,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Load the dataset and the image helper
-    print "Prepare the dataset from ", args.dataset
+    print("Prepare the dataset from ", args.dataset)
     dataset = Dataset(args.dataset, args.eval_binary)
 
     ensure_directory_exists(args.temp_dir + '/')
@@ -364,13 +365,14 @@ if __name__ == '__main__':
         print("initialize image helper")
         image_helper = ImageHelper(args.S, args.L, transforms)
 
-
     if args.stage == 'extract_train':
         print("extract regions for training")
         # extract at a single scale
         S = args.S
         image_helper.S = S
         N_dataset = dataset.N_images
+
+
         def process_image(i):
             print(i),
             sys.stdout.flush()
@@ -386,6 +388,7 @@ if __name__ == '__main__':
 
             rmac_descriptors = rmac(activation_map, args.L)
             np.save(fname_out, rmac_descriptors.data.numpy())
+
 
         map(process_image, range(dataset.N_images))
 
@@ -424,6 +427,7 @@ if __name__ == '__main__':
         image_helper.S = S
         N_dataset = dataset.N_images
 
+
         def process_image(fname_in, roi, fname_out):
             softmax = torch.nn.Softmax().cuda()
             I = image_helper.load_and_prepare_image(fname_in, roi=roi)
@@ -434,6 +438,7 @@ if __name__ == '__main__':
             activation_map = net.features(vc).cpu()
             descriptors = rmac(activation_map, args.L, pca=pca)
             np.save(fname_out, descriptors.data.numpy())
+
 
         if args.stage == 'db_features':
             for i in range(dataset.N_images):

@@ -8,13 +8,9 @@
 
 DIR="/scratch/ssd001/datasets/imagenet/train"
 ARCH="alexnet"
-LR=0.05
-WD=-5
-K=10000
-WORKERS=12
-EXP="./exp"
+K=10
+EXP="./out"
 
 mkdir -p ${EXP}
 
-python main.py ${DIR} --exp ${EXP} --arch ${ARCH} \
---lr ${LR} --wd ${WD} --k ${K} --sobel --verbose --workers ${WORKERS}
+python main.py ${DIR} --exp ${EXP} --arch ${ARCH} --k ${K} --sobel --verbose

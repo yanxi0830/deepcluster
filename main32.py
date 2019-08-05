@@ -24,13 +24,15 @@ import torchvision.datasets as datasets
 import clustering
 import models
 from util import AverageMeter, Logger, UnifLabelSampler
+from data.constants import DATASET_ROOT
+from data.downsampled_imagenet import ImageNetDS, ImageNetDSPseudoLabel, ImageNetDSKMeans, ImageNetDSPseudoLabelSubset
 
 parser = argparse.ArgumentParser(description='PyTorch Implementation of DeepCluster')
 
-parser.add_argument('data', metavar='DIR', help='path to dataset')
+# parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--arch', '-a', type=str, metavar='ARCH',
-                    choices=['alexnet', 'vgg16'], default='alexnet',
-                    help='CNN architecture (default: alexnet)')
+                    choices=['alexnet', 'vgg16', 'alexnet32'], default='alexnet32',
+                    help='CNN architecture (default: alexnet32)')
 parser.add_argument('--sobel', action='store_true', help='Sobel filtering')
 parser.add_argument('--clustering', type=str, choices=['Kmeans', 'PIC'],
                     default='Kmeans', help='clustering algorithm (default: Kmeans)')
@@ -59,6 +61,51 @@ parser.add_argument('--checkpoints', type=int, default=25000,
 parser.add_argument('--seed', type=int, default=31, help='random seed (default: 31)')
 parser.add_argument('--exp', type=str, default='', help='path to exp folder')
 parser.add_argument('--verbose', action='store_true', help='chatty')
+
+# arguments to specify training data
+parser.add_argument('--cluster-idx', type=int, default=0,
+                    help="Index of the K-Means cluster [0, n-clusters-1]")
+parser.add_argument('--cluster-file', type=str, default='',
+                    help="Path to the pre-computed cluster file")
+
+
+def get_downsampled_imagenet_datasets(args):
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+    tra = [transforms.Resize(32),
+           transforms.CenterCrop(32),
+           transforms.ToTensor(),
+           normalize]
+
+    if args.cluster_file != '':
+        train_dataset = ImageNetDSKMeans(DATASET_ROOT + 'downsampled-imagenet-32/', 32, train=True,
+                                         transform=transforms.Compose(tra),
+                                         cluster_file=args.cluster_file, cluster_idx=args.cluster_idx,
+                                         stats=True)
+    else:
+        train_dataset = ImageNetDS(DATASET_ROOT + 'downsampled-imagenet-32/', 32, train=True,
+                                   transform=transforms.Compose(tra))
+
+    return train_dataset
+
+
+def get_pseudo_label_dataset(args, images_lists):
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+    tra = [transforms.Resize(32),
+           transforms.CenterCrop(32),
+           transforms.ToTensor(),
+           normalize]
+
+    if args.cluster_file != '':
+        dataset = ImageNetDSPseudoLabelSubset(DATASET_ROOT + 'downsampled-imagenet-32/', 32, train=True,
+                                              transform=transforms.Compose(tra), cluster_file=args.cluster_file,
+                                              cluster_idx=args.cluster_idx, images_lists=images_lists)
+    else:
+        dataset = ImageNetDSPseudoLabel(DATASET_ROOT + 'downsampled-imagenet-32/', 32, train=True,
+                                        transform=transforms.Compose(tra), images_lists=images_lists)
+
+    return dataset
 
 
 def main():
@@ -116,18 +163,11 @@ def main():
     # creating cluster assignments log
     cluster_log = Logger(os.path.join(args.exp, 'clusters'))
 
-    # preprocessing of data
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-    tra = [transforms.Resize(256),
-           transforms.CenterCrop(224),
-           transforms.ToTensor(),
-           normalize]
-
     # load the data
     end = time.time()
-    dataset = datasets.ImageFolder(args.data, transform=transforms.Compose(tra))
-    if args.verbose: print('Load dataset: {0:.2f} s'.format(time.time() - end))
+    dataset = get_downsampled_imagenet_datasets(args)
+    if args.verbose:
+        print('Load dataset: {0:.2f} s'.format(time.time() - end))
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=args.batch,
                                              num_workers=args.workers,
@@ -142,7 +182,7 @@ def main():
 
         # remove head
         model.top_layer = None
-        model.classifier = nn.Sequential(*list(model.classifier.children())[:-1])   # remove ReLU
+        model.classifier = nn.Sequential(*list(model.classifier.children())[:-1])
 
         # get the features for the whole dataset
         features = compute_features(dataloader, model, len(dataset))
@@ -151,10 +191,11 @@ def main():
         clustering_loss = deepcluster.cluster(features, verbose=args.verbose)
 
         # assign pseudo-labels
-        train_dataset = clustering.cluster_assign(deepcluster.images_lists,
-                                                  dataset.imgs)
+        # train_dataset = clustering.cluster_assign(deepcluster.images_lists,
+        #                                           dataset.imgs)
+        train_dataset = get_pseudo_label_dataset(args, deepcluster.images_lists)
 
-        # uniformely sample per target
+        # uniformly sample per target
         sampler = UnifLabelSampler(int(args.reassign * len(train_dataset)),
                                    deepcluster.images_lists)
 

@@ -4,6 +4,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
+# python eval_linear32.py --model ./exp32/checkpoint.pth.tar --conv 3 --lr 0.1 --wd -7 --verbose --exp test-linear --work
+# ers 16
 
 import argparse
 import os
@@ -19,6 +21,10 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 from util import AverageMeter, learning_rate_decay, load_model, Logger
+from data.downsampled_imagenet import ImageNetDS
+from data.cub200 import CUB200, CUB200Subset
+from data.constants import DATASET_ROOT
+from data.transforms import *
 
 parser = argparse.ArgumentParser(description="""Train linear classifier on top
                                  of frozen convolutional layers of an AlexNet.""")
@@ -41,6 +47,43 @@ parser.add_argument('--weight_decay', '--wd', default=-4, type=float,
                     help='weight decay pow (default: -4)')
 parser.add_argument('--seed', type=int, default=31, help='random seed')
 parser.add_argument('--verbose', action='store_true', help='chatty')
+parser.add_argument('--fast-adapt', action='store_true', default=True,
+                    help='Doing the fast adaptation with train/val split, no testing on test set')
+
+
+def get_downsampled_imagenet_datasets(args):
+    train_transform, test_transform = get_downsampled_imagenet_transforms()
+
+    train_dataset = ImageNetDS(DATASET_ROOT + 'downsampled-imagenet-32/', 32, train=True,
+                               transform=train_transform)
+
+    val_dataset = ImageNetDS(DATASET_ROOT + 'downsampled-imagenet-32/', 32, train=False,
+                             transform=test_transform)
+
+    return train_dataset, val_dataset
+
+
+def get_cub200_data_loaders(args):
+    transform_train, transform_test = get_cub200_transforms()
+
+    if args.fast_adapt:
+        train_dataset = CUB200Subset(root=DATASET_ROOT, train_val_test='train', download=True,
+                                     transform=transform_train)
+    else:
+        train_dataset = CUB200(root=DATASET_ROOT, train=True, download=True, transform=transform_train)
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
+                                               num_workers=args.workers, pin_memory=True)
+
+    val_dataset = CUB200Subset(root=DATASET_ROOT, train_val_test='val', download=True, transform=transform_test)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True,
+                                             num_workers=args.workers, pin_memory=True)
+
+    test_dataset = CUB200Subset(root=DATASET_ROOT, train_val_test='test', download=True, transform=transform_test)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True,
+                                              num_workers=args.workers, pin_memory=True)
+
+    return train_loader, val_loader, test_loader
 
 
 def main():
@@ -66,52 +109,24 @@ def main():
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
-    # data loading code
-    traindir = os.path.join(args.data, 'train')
-    valdir = os.path.join(args.data, 'val')
+    # train_dataset, val_dataset = get_downsampled_imagenet_datasets(args)
+    #
+    # train_loader = torch.utils.data.DataLoader(train_dataset,
+    #                                            batch_size=args.batch_size,
+    #                                            shuffle=True,
+    #                                            num_workers=args.workers,
+    #                                            pin_memory=True)
+    #
+    # val_loader = torch.utils.data.DataLoader(val_dataset,
+    #                                          batch_size=args.batch_size,
+    #                                          shuffle=False,
+    #                                          num_workers=args.workers)
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    if args.tencrops:
-        transformations_val = [
-            transforms.Resize(256),
-            transforms.TenCrop(224),
-            transforms.Lambda(lambda crops: torch.stack([normalize(transforms.ToTensor()(crop)) for crop in crops])),
-        ]
-    else:
-        transformations_val = [transforms.Resize(256),
-                               transforms.CenterCrop(224),
-                               transforms.ToTensor(),
-                               normalize]
-
-    transformations_train = [transforms.Resize(256),
-                             transforms.CenterCrop(256),
-                             transforms.RandomCrop(224),
-                             transforms.RandomHorizontalFlip(),
-                             transforms.ToTensor(),
-                             normalize]
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        transform=transforms.Compose(transformations_train)
-    )
-
-    val_dataset = datasets.ImageFolder(
-        valdir,
-        transform=transforms.Compose(transformations_val)
-    )
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=args.batch_size,
-                                               shuffle=True,
-                                               num_workers=args.workers,
-                                               pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset,
-                                             batch_size=int(args.batch_size / 2),
-                                             shuffle=False,
-                                             num_workers=args.workers)
+    train_loader, _, val_loader = get_cub200_data_loaders(args)
 
     # logistic regression
-    reglog = RegLog(args.conv, len(train_dataset.classes)).cuda()
+    num_classes = len(np.unique(train_loader.dataset.targets))
+    reglog = RegLog(args.conv, num_classes).cuda()
     optimizer = torch.optim.SGD(
         filter(lambda x: x.requires_grad, reglog.parameters()),
         args.lr,
@@ -136,6 +151,8 @@ def main():
 
         # evaluate on validation set
         prec1, prec5, loss = validate(val_loader, model, reglog, criterion)
+
+        print("Validation: Average Loss: {}, Accuracy Prec@1 {}, Prec@5 {}".format(loss, prec1, prec5))
 
         loss_log.log(loss)
         prec1_log.log(prec1)
@@ -166,19 +183,19 @@ class RegLog(nn.Module):
         self.conv = conv
         if conv == 1:
             self.av_pool = nn.AvgPool2d(6, stride=6, padding=3)
-            s = 9600
+            s = 576
         elif conv == 2:
             self.av_pool = nn.AvgPool2d(4, stride=4, padding=0)
-            s = 9216
+            s = 768
         elif conv == 3:
             self.av_pool = nn.AvgPool2d(3, stride=3, padding=1)
-            s = 9600
+            s = 1536
         elif conv == 4:
             self.av_pool = nn.AvgPool2d(3, stride=3, padding=1)
-            s = 9600
+            s = 1024
         elif conv == 5:
             self.av_pool = nn.AvgPool2d(2, stride=2, padding=0)
-            s = 9216
+            s = 1024
         else:
             raise NotImplementedError('conv {} is not supported!'.format(conv))
         self.linear = nn.Linear(s, num_labels)
@@ -282,41 +299,37 @@ def validate(val_loader, model, reglog, criterion):
     model.eval()
     softmax = nn.Softmax(dim=1).cuda()
     end = time.time()
-    for i, (input_tensor, target) in enumerate(val_loader):
-        if args.tencrops:
-            bs, ncrops, c, h, w = input_tensor.size()
-            input_tensor = input_tensor.view(-1, c, h, w)
-        target = target.cuda()
-        input_var = torch.autograd.Variable(input_tensor.cuda(), volatile=True)
-        target_var = torch.autograd.Variable(target, volatile=True)
+    with torch.no_grad():
+        for i, (input_tensor, target) in enumerate(val_loader):
+            if args.tencrops:
+                bs, ncrops, c, h, w = input_tensor.size()
+                input_tensor = input_tensor.view(-1, c, h, w)
+            target = target.cuda()
+            input_var = input_tensor.cuda()
+            target_var = target
 
-        output = reglog(forward(input_var, model, reglog.conv))
+            output = reglog(forward(input_var, model, reglog.conv))
 
-        if args.tencrops:
-            output_central = output.view(bs, ncrops, -1)[:, ncrops / 2 - 1, :]
-            output = softmax(output)
-            output = torch.squeeze(output.view(bs, ncrops, -1).mean(1))
-        else:
             output_central = output
 
-        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-        top1.update(prec1[0], input_tensor.size(0))
-        top5.update(prec5[0], input_tensor.size(0))
-        loss = criterion(output_central, target_var)
-        losses.update(loss.data[0], input_tensor.size(0))
+            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+            top1.update(prec1[0], input_tensor.size(0))
+            top5.update(prec5[0], input_tensor.size(0))
+            loss = criterion(output_central, target_var)
+            losses.update(loss.item(), input_tensor.size(0))
 
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
 
-        if args.verbose and i % 100 == 0:
-            print('Validation: [{0}/{1}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'
-                  .format(i, len(val_loader), batch_time=batch_time,
-                          loss=losses, top1=top1, top5=top5))
+            if args.verbose and i % 100 == 0:
+                print('Validation: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'
+                      .format(i, len(val_loader), batch_time=batch_time,
+                              loss=losses, top1=top1, top5=top5))
 
     return top1.avg, top5.avg, losses.avg
 

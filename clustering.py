@@ -82,10 +82,10 @@ def preprocess_features(npdata, pca=256):
         np.array of dim N * pca: data PCA-reduced, whitened and L2-normalized
     """
     _, ndim = npdata.shape
-    npdata =  npdata.astype('float32')
+    npdata = npdata.astype('float32')
 
     # Apply PCA-whitening with Faiss
-    mat = faiss.PCAMatrix (ndim, pca, eigen_power=-0.5)
+    mat = faiss.PCAMatrix(ndim, pca, eigen_power=-0.5)
     mat.train(npdata)
     assert mat.is_trained
     npdata = mat.apply_py(npdata)
@@ -231,7 +231,7 @@ def make_adjacencyW(I, D, sigma):
     indptr = np.multiply(k, np.arange(V + 1))
 
     def exp_ker(d):
-        return np.exp(-d / sigma**2)
+        return np.exp(-d / sigma ** 2)
 
     exp_ker = np.vectorize(exp_ker)
     res_D = exp_ker(D)

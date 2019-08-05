@@ -6,3 +6,4 @@
 #
 from .vgg16 import *
 from .alexnet import *
+from .alexnet32 import *
