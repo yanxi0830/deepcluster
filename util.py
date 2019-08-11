@@ -39,7 +39,7 @@ def load_model(path):
 
         # load weights
         model.load_state_dict(checkpoint['state_dict'])
-        print("Loaded")
+        print("Loaded @ Epoch {}".format(checkpoint['epoch']))
     else:
         model = None
         print("=> no checkpoint found at '{}'".format(path))

@@ -23,6 +23,7 @@ import torchvision.datasets as datasets
 from util import AverageMeter, learning_rate_decay, load_model, Logger
 from data.downsampled_imagenet import ImageNetDS
 from data.cub200 import CUB200, CUB200Subset
+from data.oxfordpets import OxfordPets, OxfordPetsSplit
 from data.constants import DATASET_ROOT
 from data.transforms import *
 
@@ -36,7 +37,7 @@ parser.add_argument('--conv', type=int, choices=[1, 2, 3, 4, 5],
 parser.add_argument('--tencrops', action='store_true',
                     help='validation accuracy averaged over 10 crops')
 parser.add_argument('--exp', type=str, default='', help='exp folder')
-parser.add_argument('--workers', default=4, type=int,
+parser.add_argument('--workers', default=32, type=int,
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', type=int, default=90, help='number of total epochs to run (default: 90)')
 parser.add_argument('--batch_size', default=256, type=int,
@@ -86,6 +87,28 @@ def get_cub200_data_loaders(args):
     return train_loader, val_loader, test_loader
 
 
+def get_pets_data_loaders(args):
+    transform_train, transform_test = get_oxford_pets_transforms()
+
+    if args.fast_adapt:
+        train_dataset = OxfordPetsSplit(DATASET_ROOT + 'OxfordIIITPet', 'train', transform=transform_train)
+    else:
+        train_dataset = OxfordPets(DATASET_ROOT + 'OxfordIIITPet', train=True, transform=transform_train)
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
+                                               num_workers=args.workers, pin_memory=True)
+
+    val_dataset = OxfordPetsSplit(DATASET_ROOT + 'OxfordIIITPet', 'val', transform=transform_test)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True,
+                                             num_workers=args.workers, pin_memory=True)
+
+    test_dataset = OxfordPetsSplit(DATASET_ROOT + 'OxfordIIITPet', 'test', transform=transform_test)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True,
+                                              num_workers=args.workers, pin_memory=True)
+
+    return train_loader, test_loader, val_loader
+
+
 def main():
     global args
     args = parser.parse_args()
@@ -123,9 +146,11 @@ def main():
     #                                          num_workers=args.workers)
 
     train_loader, _, val_loader = get_cub200_data_loaders(args)
+    train_loader, _, val_loader = get_pets_data_loaders(args)
 
     # logistic regression
     num_classes = len(np.unique(train_loader.dataset.targets))
+    print("num_classes", num_classes)
     reglog = RegLog(args.conv, num_classes).cuda()
     optimizer = torch.optim.SGD(
         filter(lambda x: x.requires_grad, reglog.parameters()),

@@ -6,7 +6,7 @@ set -x
 
 for (( e=0; e<10; e++ ))
 do
-    EXP=./deepcluster/c$e;
+    EXP=./iic-head0-model5000-e60/c$e;
     mkdir -p ${EXP};
-    python main32.py --exp ${EXP} --arch alexnet32 --verbose --workers 32 --cluster-file $1 --cluster-idx $e --k 1000;
+    python main32.py --exp ${EXP} --arch alexnet32 --verbose --workers 32 --cluster-file $1 --cluster-idx $e --k 3000;
 done
