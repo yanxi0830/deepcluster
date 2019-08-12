@@ -104,10 +104,10 @@ def main():
     print("pca features", pca_features.shape)
 
     # kmeans on features
-    # print("computing kmeans cluster...", pca_features.shape)
-    # kmeans = KMeans(n_clusters=args.num_cluster, random_state=0, verbose=args.verbose).fit(pca_features)
-    # cluster_labels = np.array(kmeans.labels_)
-    # print("finished kmeans")
+    print("computing kmeans cluster...", pca_features.shape)
+    kmeans = KMeans(n_clusters=args.num_cluster, random_state=0, verbose=args.verbose).fit(pca_features)
+    cluster_labels = np.array(kmeans.labels_)
+    print("finished kmeans")
 
     print("faiss kmeans...", pca_features.shape)
     I, loss = run_kmeans(pca_features, args.num_cluster, verbose=args.verbose)

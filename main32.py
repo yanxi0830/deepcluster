@@ -33,7 +33,7 @@ parser = argparse.ArgumentParser(description='PyTorch Implementation of DeepClus
 parser.add_argument('--arch', '-a', type=str, metavar='ARCH',
                     choices=['alexnet', 'vgg16', 'alexnet32'], default='alexnet32',
                     help='CNN architecture (default: alexnet32)')
-parser.add_argument('--sobel', action='store_true', help='Sobel filtering')
+parser.add_argument('--sobel', action='store_true', default=True, help='Sobel filtering')
 parser.add_argument('--clustering', type=str, choices=['Kmeans', 'PIC'],
                     default='Kmeans', help='clustering algorithm (default: Kmeans)')
 parser.add_argument('--nmb_cluster', '--k', type=int, default=10000,

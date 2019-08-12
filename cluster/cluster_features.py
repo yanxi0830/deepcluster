@@ -180,16 +180,26 @@ def main():
     view_dataset = ImageNetDS(DATASET_ROOT + 'downsampled-imagenet-32/', 32, train=True,
                               transform=torchvision.transforms.ToTensor())
 
+    cluster_labels = np.ones(len(dataset.train_labels)) * -1
+
     for c in range(args.nmb_cluster):
         cluster_indices = cluster_assignments[c]
+        cluster_labels[cluster_indices] = c
+
         print("cluster {} have {} images".format(c, len(cluster_indices)))
         c_dataloader = torch.utils.data.DataLoader(view_dataset, batch_size=64,
                                                    sampler=SubsetRandomSampler(cluster_indices))
 
         for (images, targets) in c_dataloader:
             print("saving cluster {}".format(c), images.shape)
-            torchvision.utils.save_image(images, os.path.join(args.exp, 'hahah{}.png'.format(c)))
+            torchvision.utils.save_image(images, os.path.join(args.exp, 'c{}.png'.format(c)))
             break
+
+    filename = 'deepcluster-k{}-conv{}-cluster.pickle'.format(args.num_cluster, args.conv)
+    save = {'label': cluster_labels}
+    with open(filename, 'wb') as f:
+        pickle.dump(save, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print("saved kmeans deepcluster cluster to {}".format(save))
 
     # # training convnet with DeepCluster
     # for epoch in range(args.start_epoch, args.epochs):
