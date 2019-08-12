@@ -14,7 +14,7 @@ __all__ = ['AlexNet32', 'alexnet32']
 
 # (number of filters, kernel size, stride, pad)
 CFG = {
-    '2012-32': [(96, 3, 2, 1), 'M', (256, 3, 1, 1), 'M', (384, 3, 1, 1), (384, 3, 1, 1), (256, 3, 1, 1), 'M']
+    '2012-32': [(64, 3, 2, 1), 'M', (192, 3, 1, 1), 'M', (384, 3, 1, 1), (256, 3, 1, 1), (256, 3, 1, 1), 'M']
 }
 
 
@@ -76,22 +76,37 @@ class AlexNet32(nn.Module):
                 m.bias.data.zero_()
 
 
+# def make_layers_features_32(cfg, input_dim, bn):
+#     return nn.Sequential(
+#         nn.Conv2d(in_channels=input_dim, out_channels=64, kernel_size=3, stride=2, padding=1),
+#         nn.ReLU(inplace=True),
+#         nn.MaxPool2d(kernel_size=2),
+#         nn.Conv2d(64, 192, kernel_size=3, padding=1),
+#         nn.ReLU(inplace=True),
+#         nn.MaxPool2d(kernel_size=2),
+#         nn.Conv2d(192, 384, kernel_size=3, padding=1),
+#         nn.ReLU(inplace=True),
+#         nn.Conv2d(384, 256, kernel_size=3, padding=1),
+#         nn.ReLU(inplace=True),
+#         nn.Conv2d(256, 256, kernel_size=3, padding=1),
+#         nn.ReLU(inplace=True),
+#         nn.MaxPool2d(kernel_size=2),
+#     )
+
 def make_layers_features_32(cfg, input_dim, bn):
-    return nn.Sequential(
-        nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
-        nn.ReLU(inplace=True),
-        nn.MaxPool2d(kernel_size=2),
-        nn.Conv2d(64, 192, kernel_size=3, padding=1),
-        nn.ReLU(inplace=True),
-        nn.MaxPool2d(kernel_size=2),
-        nn.Conv2d(192, 384, kernel_size=3, padding=1),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(384, 256, kernel_size=3, padding=1),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(256, 256, kernel_size=3, padding=1),
-        nn.ReLU(inplace=True),
-        nn.MaxPool2d(kernel_size=2),
-    )
+    layers = []
+    in_channels = input_dim
+    for v in cfg:
+        if v == 'M':
+            layers += [nn.MaxPool2d(kernel_size=2)]
+        else:
+            conv2d = nn.Conv2d(in_channels, v[0], kernel_size=v[1], stride=v[2], padding=v[3])
+            if bn:
+                layers += [conv2d, nn.BatchNorm2d(v[0]), nn.ReLU(inplace=True)]
+            else:
+                layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v[0]
+    return nn.Sequential(*layers)
 
 
 def alexnet32(sobel=False, bn=True, out=1000):
