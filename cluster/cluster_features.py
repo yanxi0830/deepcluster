@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 # python cluster_features.py /scratch/ssd001/datasets/imagenet/val --exp ./out/ --arch alexnet --k
-# 10 --sobel --verbose --resume ../deepcluster_models/alexnet/checkpoint.pth.tar
+# 10 --sobel --verbose --model ../deepcluster_models/alexnet/checkpoint.pth.tar
 import argparse
 import os
 import pickle
@@ -29,6 +29,7 @@ import torchvision
 sys.path.append('..')
 import clustering
 import models
+from util import load_model
 from util import AverageMeter, Logger, UnifLabelSampler
 from data.downsampled_imagenet import ImageNetDS
 from data.constants import DATASET_ROOT
@@ -59,13 +60,16 @@ parser.add_argument('--start_epoch', default=0, type=int,
 parser.add_argument('--batch', default=256, type=int,
                     help='mini-batch size (default: 256)')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum (default: 0.9)')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
+parser.add_argument('--model', default='', type=str, metavar='PATH',
                     help='path to checkpoint (default: None)')
 parser.add_argument('--checkpoints', type=int, default=25000,
                     help='how many iterations between two checkpoints (default: 25000)')
 parser.add_argument('--seed', type=int, default=31, help='random seed (default: 31)')
 parser.add_argument('--exp', type=str, default='', help='path to exp folder')
 parser.add_argument('--verbose', action='store_true', help='chatty')
+
+parser.add_argument('--pca', type=int, default=256,
+                    help='PCA dimensions')
 
 
 def main():
@@ -78,47 +82,16 @@ def main():
     torch.cuda.manual_seed_all(args.seed)
     np.random.seed(args.seed)
 
-    # CNN
-    if args.verbose:
-        print('Architecture: {}'.format(args.arch))
-    model = models.__dict__[args.arch](sobel=args.sobel)
-    fd = int(model.top_layer.weight.size()[1])
-    model.top_layer = None
-    # model.top_layer = nn.Linear(fd, args.nmb_cluster)
-    model.features = torch.nn.DataParallel(model.features)
+    # load model
+    model = load_model(args.model)
     model.cuda()
     cudnn.benchmark = True
 
-    # create optimizer
-    optimizer = torch.optim.SGD(
-        filter(lambda x: x.requires_grad, model.parameters()),
-        lr=args.lr,
-        momentum=args.momentum,
-        weight_decay=10 ** args.wd,
-    )
+    # freeze the features layers
+    for param in model.features.parameters():
+        param.requires_grad = False
 
-    # define loss function
-    criterion = nn.CrossEntropyLoss().cuda()
-
-    # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            # remove top_layer parameters from checkpoint
-            for key in list(checkpoint['state_dict'].keys()):
-                if 'top_layer' in key:
-                    del checkpoint['state_dict'][key]
-                    print("deleting {}".format(key))
-            model.load_state_dict(checkpoint['state_dict'])
-            # optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
-
-    # creating checkpoint repo
+    # creating cluster exp
     if not os.path.isdir(args.exp):
         os.makedirs(args.exp)
 
@@ -164,7 +137,7 @@ def main():
 
         # 3) cluster the features
         print("clustering the features...")
-        clustering_loss = deepcluster.cluster(features, verbose=args.verbose)
+        clustering_loss = deepcluster.cluster(features, verbose=args.verbose, pca=args.pca)
 
         # 4) assign pseudo-labels
         cluster_log.log(deepcluster.images_lists)
@@ -195,159 +168,11 @@ def main():
             torchvision.utils.save_image(images, os.path.join(args.exp, 'c{}.png'.format(c)))
             break
 
-    filename = 'deepcluster-k{}-conv{}-cluster.pickle'.format(args.num_cluster, args.conv)
+    filename = 'deepcluster-k{}-pca{}-cluster.pickle'.format(args.nmb_cluster, args.pca)
     save = {'label': cluster_labels}
     with open(filename, 'wb') as f:
         pickle.dump(save, f, protocol=pickle.HIGHEST_PROTOCOL)
     print("saved kmeans deepcluster cluster to {}".format(save))
-
-    # # training convnet with DeepCluster
-    # for epoch in range(args.start_epoch, args.epochs):
-    #     end = time.time()
-    #
-    #     # remove head
-    #     model.top_layer = None
-    #     model.classifier = nn.Sequential(*list(model.classifier.children())[:-1])
-    #
-    #     # get the features for the whole dataset
-    #     features = compute_features(dataloader, model, len(dataset))
-    #
-    #     # cluster the features
-    #     clustering_loss = deepcluster.cluster(features, verbose=args.verbose)
-    #
-    #     # assign pseudo-labels
-    #     train_dataset = clustering.cluster_assign(deepcluster.images_lists,
-    #                                               dataset.imgs)
-    #
-    #     # uniformely sample per target
-    #     sampler = UnifLabelSampler(int(args.reassign * len(train_dataset)),
-    #                                deepcluster.images_lists)
-    #
-    #     train_dataloader = torch.utils.data.DataLoader(
-    #         train_dataset,
-    #         batch_size=args.batch,
-    #         num_workers=args.workers,
-    #         sampler=sampler,
-    #         pin_memory=True,
-    #     )
-    #
-    #     # set last fully connected layer
-    #     mlp = list(model.classifier.children())
-    #     mlp.append(nn.ReLU(inplace=True).cuda())
-    #     model.classifier = nn.Sequential(*mlp)
-    #     model.top_layer = nn.Linear(fd, len(deepcluster.images_lists))
-    #     model.top_layer.weight.data.normal_(0, 0.01)
-    #     model.top_layer.bias.data.zero_()
-    #     model.top_layer.cuda()
-    #
-    #     # train network with clusters as pseudo-labels
-    #     end = time.time()
-    #     loss = train(train_dataloader, model, criterion, optimizer, epoch)
-    #
-    #     # print log
-    #     if args.verbose:
-    #         print('###### Epoch [{0}] ###### \n'
-    #               'Time: {1:.3f} s\n'
-    #               'Clustering loss: {2:.3f} \n'
-    #               'ConvNet loss: {3:.3f}'
-    #               .format(epoch, time.time() - end, clustering_loss, loss))
-    #         try:
-    #             nmi = normalized_mutual_info_score(
-    #                 clustering.arrange_clustering(deepcluster.images_lists),
-    #                 clustering.arrange_clustering(cluster_log.data[-1])
-    #             )
-    #             print('NMI against previous assignment: {0:.3f}'.format(nmi))
-    #         except IndexError:
-    #             pass
-    #         print('####################### \n')
-    #     # save running checkpoint
-    #     torch.save({'epoch': epoch + 1,
-    #                 'arch': args.arch,
-    #                 'state_dict': model.state_dict(),
-    #                 'optimizer': optimizer.state_dict()},
-    #                os.path.join(args.exp, 'checkpoint.pth.tar'))
-    #
-    #     # save cluster assignments
-    #     cluster_log.log(deepcluster.images_lists)
-
-
-# def train(loader, model, crit, opt, epoch):
-#     """Training of the CNN.
-#         Args:
-#             loader (torch.utils.data.DataLoader): Data loader
-#             model (nn.Module): CNN
-#             crit (torch.nn): loss
-#             opt (torch.optim.SGD): optimizer for every parameters with True
-#                                    requires_grad in model except top layer
-#             epoch (int)
-#     """
-#     batch_time = AverageMeter()
-#     losses = AverageMeter()
-#     data_time = AverageMeter()
-#     forward_time = AverageMeter()
-#     backward_time = AverageMeter()
-#
-#     # switch to train mode
-#     model.train()
-#
-#     # create an optimizer for the last fc layer
-#     optimizer_tl = torch.optim.SGD(
-#         model.top_layer.parameters(),
-#         lr=args.lr,
-#         weight_decay=10 ** args.wd,
-#     )
-#
-#     end = time.time()
-#     for i, (input_tensor, target) in enumerate(loader):
-#         data_time.update(time.time() - end)
-#
-#         # save checkpoint
-#         n = len(loader) * epoch + i
-#         if n % args.checkpoints == 0:
-#             path = os.path.join(
-#                 args.exp,
-#                 'checkpoints',
-#                 'checkpoint_' + str(n / args.checkpoints) + '.pth.tar',
-#             )
-#             if args.verbose:
-#                 print('Save checkpoint at: {0}'.format(path))
-#             torch.save({
-#                 'epoch': epoch + 1,
-#                 'arch': args.arch,
-#                 'state_dict': model.state_dict(),
-#                 'optimizer': opt.state_dict()
-#             }, path)
-#
-#         target = target.cuda()
-#         input_var = torch.autograd.Variable(input_tensor.cuda())
-#         target_var = torch.autograd.Variable(target)
-#
-#         output = model(input_var)
-#         loss = crit(output, target_var)
-#
-#         # record loss
-#         losses.update(loss.item(), input_tensor.size(0))
-#
-#         # compute gradient and do SGD step
-#         opt.zero_grad()
-#         optimizer_tl.zero_grad()
-#         loss.backward()
-#         opt.step()
-#         optimizer_tl.step()
-#
-#         # measure elapsed time
-#         batch_time.update(time.time() - end)
-#         end = time.time()
-#
-#         if args.verbose and (i % 200) == 0:
-#             print('Epoch: [{0}][{1}/{2}]\t'
-#                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-#                   'Data: {data_time.val:.3f} ({data_time.avg:.3f})\t'
-#                   'Loss: {loss.val:.4f} ({loss.avg:.4f})'
-#                   .format(epoch, i, len(loader), batch_time=batch_time,
-#                           data_time=data_time, loss=losses))
-#
-#     return losses.avg
 
 
 def compute_features(dataloader, model, N):

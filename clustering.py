@@ -191,7 +191,7 @@ class Kmeans:
     def __init__(self, k):
         self.k = k
 
-    def cluster(self, data, verbose=False):
+    def cluster(self, data, verbose=False, pca=256):
         """Performs k-means clustering.
             Args:
                 x_data (np.array N * dim): data to cluster
@@ -199,7 +199,7 @@ class Kmeans:
         end = time.time()
 
         # PCA-reducing, whitening and L2-normalization
-        xb = preprocess_features(data)
+        xb = preprocess_features(data, pca=pca)
 
         # cluster the data
         I, loss = run_kmeans(xb, self.k, verbose)

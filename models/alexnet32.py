@@ -110,6 +110,7 @@ def make_layers_features_32(cfg, input_dim, bn):
 
 
 def alexnet32(sobel=False, bn=True, out=1000):
+    # TODO: change BN
     dim = 2 + int(not sobel)
     model = AlexNet32(make_layers_features_32(CFG['2012-32'], dim, bn=bn), out, sobel)
     return model
